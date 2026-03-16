@@ -1,3 +1,5 @@
+import os
+from datetime import datetime
 import pandas as pd
 from queries.fetch_jobsteps import fetch_jobsteps_for_guid
 from processing.transformer import (
@@ -10,8 +12,18 @@ INPUT_CSV = "input/job_guids.csv"
 OUTPUT_DIR = "output"
 
 
+def _create_run_folder():
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    folder = os.path.join(OUTPUT_DIR, f"run_{timestamp}")
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
 def main():
     print("Agent started.")
+    run_folder = _create_run_folder()
+    print(f"Output folder: {run_folder}")
+
     input_df = pd.read_csv(INPUT_CSV)
     conn = get_connection()
 
@@ -31,7 +43,7 @@ def main():
         print(f"  Fetched {len(df)} rows.")
 
         # Generate individual Excel report
-        xlsx_path = f"{OUTPUT_DIR}/report_{job_guid}.xlsx"
+        xlsx_path = os.path.join(run_folder, f"report_{job_guid}.xlsx")
         generate_report(df, case_count, None, xlsx_path)
 
         # Collect data for comparative HTML report
@@ -51,10 +63,10 @@ def main():
 
     # Generate comparative HTML report
     if all_runs:
-        html_path = f"{OUTPUT_DIR}/comparison_report.html"
+        html_path = os.path.join(run_folder, "comparison_report.html")
         generate_html_report(all_runs, html_path)
 
-    print("\nAgent completed.")
+    print(f"\nAgent completed. Results saved to: {run_folder}")
 
 
 if __name__ == "__main__":
