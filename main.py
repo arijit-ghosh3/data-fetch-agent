@@ -7,6 +7,7 @@ from processing.transformer import (
 )
 from processing.html_report import generate_html_report
 from processing.historical import load_run_log
+from processing.log_updater import update_run_log
 from db.connection import get_connection
 
 INPUT_CSV = "input/job_guids.csv"
@@ -74,6 +75,11 @@ def main():
     if all_runs:
         html_path = os.path.join(run_folder, "comparison_report.html")
         generate_html_report(all_runs, html_path, historical_data=historical_data)
+
+    # Update GDC_RUN_LOG.xlsx with current run data
+    if all_runs and os.path.exists(HISTORICAL_FILE):
+        print("\nUpdating GDC_RUN_LOG.xlsx with current run data...")
+        update_run_log(HISTORICAL_FILE, all_runs)
 
     print(f"\nAgent completed. Results saved to: {run_folder}")
 
