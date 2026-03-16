@@ -46,9 +46,17 @@ def _group_rows_by_stage(df):
     return groups
 
 
+def _unmerge_all(ws):
+    for merge_range in list(ws.merged_cells.ranges):
+        ws.unmerge_cells(str(merge_range))
+
+
 def generate_report(df, case_count, template_path, output_path):
     wb = openpyxl.load_workbook(template_path)
     ws = wb[TEMPLATE_SHEET]
+
+    # Unmerge all cells first so we can write freely
+    _unmerge_all(ws)
 
     # Clear existing raw data (rows 22 onwards)
     for row in range(DATA_START_ROW, ws.max_row + 1):
@@ -74,8 +82,7 @@ def generate_report(df, case_count, template_path, output_path):
     # Group raw data rows by stage
     groups = _group_rows_by_stage(df)
 
-    # Build the formula section (rows 1 onwards)
-    # Clear rows 1 to DATA_START_ROW - 2
+    # Clear formula section (rows 2 to DATA_START_ROW - 2)
     for row in range(2, DATA_START_ROW - 1):
         for col in range(1, 16):
             ws.cell(row=row, column=col).value = None
