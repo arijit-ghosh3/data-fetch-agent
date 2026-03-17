@@ -3,3 +3,4 @@ python-dotenv
 sqlalchemy
 pandas
 openpyxl
+requests

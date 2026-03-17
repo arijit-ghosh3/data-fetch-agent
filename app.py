@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from queries.fetch_jobsteps import fetch_jobsteps_for_guid
+from queries.lrc_import import import_guids_from_lrc
 from processing.transformer import (
     generate_report, _assign_rows_to_stages, _compute_timings,
 )
@@ -132,6 +133,70 @@ test_name = st.sidebar.text_input(
 sp_result_path = _build_sharepoint_result_path(user_id, selected_release, exec_date, test_name)
 st.sidebar.caption(f"SharePoint result path:")
 st.sidebar.code(sp_result_path, language=None)
+
+# --- Import from LoadRunner Cloud ---
+st.sidebar.markdown("---")
+st.sidebar.header("Import from LoadRunner Cloud")
+
+with st.sidebar.expander("LRC Import Settings", expanded=False):
+    lrc_base_url = st.text_input(
+        "LRC Base URL",
+        value=os.getenv("LRC_BASE_URL", "https://loadrunner-cloud.saas.microfocus.com"),
+    )
+    lrc_client_id = st.text_input("Client ID", value=os.getenv("LRC_CLIENT_ID", ""), type="password")
+    lrc_client_secret = st.text_input("Client Secret", value=os.getenv("LRC_CLIENT_SECRET", ""), type="password")
+    lrc_tenant_id = st.text_input("Tenant ID", value=os.getenv("LRC_TENANT_ID", ""))
+    lrc_project_id = st.text_input("Project ID", value=os.getenv("LRC_PROJECT_ID", ""))
+    lrc_filter_text = st.text_input(
+        "Transaction Filter Text",
+        value="GDC Details Debug: Captured JOBGUID_",
+        help="Only transactions whose name contains this text will be used.",
+    )
+
+lrc_run_id = st.sidebar.text_input("LRC Run ID", placeholder="e.g. 12345")
+lrc_case_count = st.sidebar.number_input(
+    "Case Count for imported GUIDs",
+    min_value=1,
+    value=7,
+    help="All GUIDs imported from this LRC run are for 7-case records by default.",
+)
+
+if st.sidebar.button("Import from LRC", type="primary"):
+    if not all([lrc_base_url, lrc_client_id, lrc_client_secret, lrc_tenant_id, lrc_project_id, lrc_run_id]):
+        st.sidebar.error("Please fill all LRC fields (URL, Client ID, Secret, Tenant, Project, Run ID).")
+    else:
+        with st.sidebar:
+            with st.spinner("Connecting to LoadRunner Cloud..."):
+                try:
+                    guids, raw_txns = import_guids_from_lrc(
+                        base_url=lrc_base_url,
+                        client_id=lrc_client_id,
+                        client_secret=lrc_client_secret,
+                        tenant_id=lrc_tenant_id,
+                        project_id=lrc_project_id,
+                        run_id=lrc_run_id.strip(),
+                        filter_text=lrc_filter_text,
+                    )
+                    if guids:
+                        imported_df = pd.DataFrame({
+                            "job_guid": guids,
+                            "case_count": [lrc_case_count] * len(guids),
+                        })
+                        imported_df.to_csv(INPUT_CSV, index=False)
+                        st.success(
+                            f"Imported {len(guids)} Job GUID(s) from LRC Run {lrc_run_id}.\n"
+                            f"(Previous input cleared and replaced.)"
+                        )
+                        st.info(f"Total transactions in run: {len(raw_txns)}")
+                        st.rerun()
+                    else:
+                        st.warning(
+                            f"No Job GUIDs found in Run {lrc_run_id}.\n"
+                            f"Total transactions: {len(raw_txns)}. "
+                            f"Check filter text or run ID."
+                        )
+                except Exception as e:
+                    st.error(f"LRC Import Error: {e}")
 
 # --- Job GUID Input ---
 st.sidebar.markdown("---")
