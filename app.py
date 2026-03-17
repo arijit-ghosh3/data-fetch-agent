@@ -21,9 +21,9 @@ from processing.log_updater import update_run_log
 from db.connection import get_connection
 
 INPUT_CSV = "input/job_guids.csv"
-HISTORICAL_FILE = "input/GDC_RUN_LOG.xlsx"
 OUTPUT_DIR = "output"
 RELEASES_FILE = "config/releases.json"
+RUN_LOG_FILENAME = "Latest_GDC_RUN_LOG.xlsx"
 
 SHAREPOINT_BASE_TEMPLATE = os.getenv(
     "SHAREPOINT_BASE_TEMPLATE",
@@ -44,6 +44,17 @@ def _build_sharepoint_result_path(user_id, release, exec_date, test_name):
     safe_test = test_name.strip().replace(" ", "_")
     folder_name = f"{date_str}_{safe_test}"
     return os.path.join(base, safe_release, folder_name)
+
+
+def _get_sp_run_log_path(user_id=None):
+    """Path to Latest_GDC_RUN_LOG.xlsx in the SharePoint RELEASE root folder."""
+    base = _resolve_sharepoint_base(user_id)
+    return os.path.join(base, RUN_LOG_FILENAME)
+
+
+def _get_local_run_log(run_folder):
+    """Local working copy of the run log inside the run output folder."""
+    return os.path.join(run_folder, RUN_LOG_FILENAME)
 
 
 def _load_releases():
@@ -359,13 +370,20 @@ with tab1:
             conn.close()
             log("Database connection closed.")
 
-            # Historical data
+            # Pick up Latest_GDC_RUN_LOG.xlsx from SharePoint RELEASE root
             progress.progress((total + 1) / (total + 3))
-            status.info("Loading historical data...")
+            status.info("Loading historical data from SharePoint...")
+            sp_run_log = _get_sp_run_log_path(user_id)
+            local_run_log = _get_local_run_log(run_folder)
             historical_data = None
-            if os.path.exists(HISTORICAL_FILE):
-                historical_data = load_run_log(HISTORICAL_FILE)
+
+            if os.path.exists(sp_run_log):
+                shutil.copy2(sp_run_log, local_run_log)
+                log(f"Copied {RUN_LOG_FILENAME} from SharePoint: {sp_run_log}")
+                historical_data = load_run_log(local_run_log)
                 log(f"Loaded {len(historical_data)} historical executions.")
+            else:
+                log(f"Warning: {RUN_LOG_FILENAME} not found at {sp_run_log}")
 
             if all_runs:
                 # Generate HTML report
@@ -375,30 +393,32 @@ with tab1:
                 generate_html_report(all_runs, html_path, historical_data=historical_data)
                 log(f"HTML report generated: {html_path}")
 
-                # Update RUN LOG
-                if os.path.exists(HISTORICAL_FILE):
+                # Update RUN LOG (local working copy)
+                if os.path.exists(local_run_log):
                     log_test_name = f"{selected_release}_{test_name}_{exec_date.strftime('%d%b%Y')}"
-                    update_run_log(HISTORICAL_FILE, all_runs, test_name=log_test_name)
-                    log("GDC_RUN_LOG.xlsx updated with current run data.")
+                    update_run_log(local_run_log, all_runs, test_name=log_test_name)
+                    log(f"{RUN_LOG_FILENAME} updated with current run data.")
 
-                # Copy to SharePoint: {base}/{release}/{date}_{test_name}/
+                # Copy results to SharePoint
                 sp_path = _build_sharepoint_result_path(user_id, selected_release, exec_date, test_name)
                 try:
                     os.makedirs(sp_path, exist_ok=True)
-                    log(f"SharePoint folder created: {sp_path}")
+                    log(f"SharePoint result folder: {sp_path}")
 
                     if os.path.exists(html_path):
                         shutil.copy2(html_path, os.path.join(sp_path, "comparison_report.html"))
-                    if os.path.exists(HISTORICAL_FILE):
-                        shutil.copy2(HISTORICAL_FILE, os.path.join(sp_path, "GDC_RUN_LOG.xlsx"))
 
-                    # Also copy individual Excel reports
                     for f_name in os.listdir(run_folder):
                         if f_name.endswith(".xlsx"):
                             shutil.copy2(
                                 os.path.join(run_folder, f_name),
                                 os.path.join(sp_path, f_name),
                             )
+
+                    # Write updated run log back to SharePoint RELEASE root
+                    if os.path.exists(local_run_log):
+                        shutil.copy2(local_run_log, sp_run_log)
+                        log(f"Updated {RUN_LOG_FILENAME} pushed back to SharePoint: {sp_run_log}")
 
                     log(f"All results copied to SharePoint: {sp_path}")
                 except Exception as e:
@@ -457,12 +477,13 @@ with tab2:
                     mime="text/html",
                 )
         with col2:
-            if os.path.exists(HISTORICAL_FILE):
-                with open(HISTORICAL_FILE, "rb") as f:
+            sp_run_log_dl = _get_sp_run_log_path(user_id)
+            if os.path.exists(sp_run_log_dl):
+                with open(sp_run_log_dl, "rb") as f:
                     st.download_button(
-                        "Download GDC_RUN_LOG.xlsx",
+                        "Download Latest_GDC_RUN_LOG.xlsx",
                         f.read(),
-                        file_name="GDC_RUN_LOG.xlsx",
+                        file_name=RUN_LOG_FILENAME,
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
     else:
@@ -472,9 +493,11 @@ with tab2:
 with tab3:
     st.header("Historical Execution Data")
 
-    if os.path.exists(HISTORICAL_FILE):
+    sp_run_log_hist = _get_sp_run_log_path(user_id)
+    if os.path.exists(sp_run_log_hist):
+        st.caption(f"Source: {sp_run_log_hist}")
         try:
-            hist_data = load_run_log(HISTORICAL_FILE)
+            hist_data = load_run_log(sp_run_log_hist)
             if hist_data:
                 hist_df = pd.DataFrame(hist_data)
                 hist_df["avg_total_fmt"] = hist_df["avg_total"].apply(
@@ -513,4 +536,7 @@ with tab3:
         except Exception as e:
             st.error(f"Error loading historical data: {e}")
     else:
-        st.warning("GDC_RUN_LOG.xlsx not found in input folder.")
+        st.warning(
+            f"{RUN_LOG_FILENAME} not found in SharePoint RELEASE folder.\n\n"
+            f"Expected at: {sp_run_log_hist}"
+        )
